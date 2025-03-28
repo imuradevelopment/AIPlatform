@@ -21,7 +21,11 @@ const isGenerating = ref(false)
 // カテゴリ管理
 const showAddCategory = ref(false)
 const editingCategory = ref(null)
-const categoryForm = ref({ name: '' })
+const categoryForm = ref({ 
+  name: '',
+  auto_generate: false,
+  generate_interval: 30
+})
 
 // 通知関連
 const isPushActive = ref(false)
@@ -513,7 +517,9 @@ function selectCategory(category) {
 function editCategory(category) {
   editingCategory.value = category
   categoryForm.value = {
-    name: category.name
+    name: category.name,
+    auto_generate: category.auto_generate || false,
+    generate_interval: category.generate_interval || 30
   }
   showAddCategory.value = true
 }
@@ -535,7 +541,11 @@ async function deleteCategory(id) {
 function closeAddCategory() {
   showAddCategory.value = false
   editingCategory.value = null
-  categoryForm.value = { name: '' }
+  categoryForm.value = { 
+    name: '',
+    auto_generate: false,
+    generate_interval: 30
+  }
 }
 
 // カテゴリ保存（修正：creator_nameを追加）
@@ -548,7 +558,9 @@ async function saveCategory() {
       await supabase
         .from('categories')
         .update({
-          name: categoryForm.value.name
+          name: categoryForm.value.name,
+          auto_generate: categoryForm.value.auto_generate,
+          generate_interval: categoryForm.value.generate_interval
         })
         .eq('id', editingCategory.value.id)
         .eq('user_id', user.value.id)
@@ -561,13 +573,24 @@ async function saveCategory() {
         .insert({
           name: categoryForm.value.name,
           user_id: user.value.id,
-          creator_name: username.value // ユーザー名を保存
+          creator_name: username.value, // ユーザー名を保存
+          auto_generate: categoryForm.value.auto_generate,
+          generate_interval: categoryForm.value.generate_interval
         })
         .select()
         .single()
       
       if (error) throw error
       categoryId = data.id
+    }
+    
+    // 自動生成設定の更新
+    if (categoryId) {
+      await supabase.rpc('update_category_schedule', {
+        p_category_id: categoryId,
+        p_auto_generate: categoryForm.value.auto_generate,
+        p_generate_interval: categoryForm.value.generate_interval
+      })
     }
     
     // 新規カテゴリ作成時は自動フォロー
@@ -677,7 +700,7 @@ async function generateArticle() {
     const formattedDate = today.toISOString().split('T')[0]
     
     // Gemini APIでのリクエスト（Google検索を強制使用）
-    const response = await fetch(import.meta.env.VITE_GEMINI_URL, {
+    const response = await fetch(import.meta.env.GEMINI_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1027,6 +1050,31 @@ function urlBase64ToUint8Array(base64String) {
               required
             />
           </div>
+          
+          <!-- 自動生成設定 -->
+          <div class="mb-4">
+            <label class="block mb-1">自動生成</label>
+            <div class="flex items-center gap-2">
+              <input
+                type="checkbox"
+                v-model="categoryForm.auto_generate"
+                class="w-4 h-4"
+              />
+              <span>記事を自動生成する</span>
+            </div>
+          </div>
+          
+          <div v-if="categoryForm.auto_generate" class="mb-4">
+            <label class="block mb-1">生成間隔（分）</label>
+            <input
+              v-model.number="categoryForm.generate_interval"
+              type="number"
+              min="5"
+              max="1440"
+              class="w-full bg-surface-variant p-2 rounded"
+            />
+          </div>
+          
           <div class="flex justify-end gap-2">
             <button type="button" class="btn-outline-secondary" @click="closeAddCategory">
               キャンセル
